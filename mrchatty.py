@@ -33,7 +33,7 @@ def signal_handler(signal, frame):
 class Chat:
     def __init__(self, port, render_message, username):
         self.render_message = render_message
-        self.nickname = username
+        self.username = username
         self.port = port
 
         try:
@@ -41,14 +41,13 @@ class Chat:
             self.sock_to_read.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self.sock_to_read.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
             self.sock_to_read.bind(('0.0.0.0', port))
-
             self.sock_to_write = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.sock_to_write.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         except Exception as e:
             raise ConnectionError('Unable to connect')
 
     def send_request(self, sock_to_write, action, data=None):
-        object_to_send = {'action': action, 'data': data, 'nickname': self.nickname}
+        object_to_send = {'action': action, 'data': data, 'username': self.username}
         sock_to_write.sendto(bytes(dumps(object_to_send), 'UTF-8'), ('255.255.255.255', self.port))
 
     def iterate(self):
@@ -83,7 +82,7 @@ class MrChaTTY:
     def render_message(message):
         sys.stdout.write('\r')
         message = loads(message)
-        sys.stdout.write('{}: {}\n'.format(message['nickname'], message['data']))
+        sys.stdout.write('[{}] {}\n'.format(message['username'], message['data']))
 #        sys.stdout.write('$ ')
         sys.stdout.flush()
 
@@ -120,7 +119,8 @@ if __name__ == '__main__':
     print('Local IP: ' + colored(ip, attrs=['bold']))
     print('----')
 
-    mrchatty = MrChaTTY(port, username)
+#    mrchatty = MrChaTTY(port, username + '@' + ip)
+    mrchatty = MrChaTTY(port, colored(username, attrs=['bold']) + '@' + ip)
 
     while True:
         mrchatty.iterate()
