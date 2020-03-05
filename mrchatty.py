@@ -5,7 +5,6 @@
 # - random colors for usernames
 # - encryption for messages
 # - send announcement message
-# - handle ctrl+d
 
 import argparse
 import asyncio
@@ -33,8 +32,11 @@ def logo():
     print(colored('Coded by: Riccardo Mollo', 'cyan'))
     print()
 
+def exception_handler(exception_type, exception, traceback):
+    print("%s: %s" % (exception_type.__name__, exception))
+
 def signal_handler(signal, frame):
-    if signal == 2: # SIGINT
+    if signal == 2: # Ctrl+C (SIGINT)
         print()
         print('You pressed Ctrl+C! Goodbye!')
         print()
@@ -68,8 +70,10 @@ class Chat:
             self.sock_to_read.bind(('0.0.0.0', port))
             self.sock_to_write = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.sock_to_write.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        except PermissionError as pe:
+            raise ConnectionError(colored('Permission denied (binding failed for port ' + str(port) + '/UDP)', 'red', attrs = ['bold']))
         except Exception as e:
-            raise ConnectionError('Unable to connect.')
+            raise ConnectionError(colored('Unable to connect.', 'red', attrs = ['bold']))
 
     def send_request(self, sock_to_write, action, data = None):
         object_to_send = {'action': action, 'data': data, 'username': self.username, 'host': self.host}
@@ -84,7 +88,7 @@ class Chat:
                 data = sock.recv(4096).decode('utf-8')
 
                 if not data:
-                    raise ConnectionAbortedError('Connection aborted.')
+                    raise ConnectionAbortedError(colored('Connection aborted.', 'red', attrs = ['bold']))
                 else:
                     self.render_message(data)
 
@@ -105,7 +109,13 @@ class MrChaTTY:
         data = self.get_input()
 
         if data is not None:
-            if data[0] == '/':
+            if (len(data) == 0): # Ctrl+D
+                print()
+                print('You pressed Ctrl+D! Goodbye!')
+                print()
+
+                sys.exit()
+            elif data[0] == '/':
                 command = data[1:].rstrip()
 
                 if (command == 'date'):
@@ -123,11 +133,11 @@ class MrChaTTY:
         h = message['host']
         d = message['data']
 
-        if (a == 'announcement'):
-            if (u != username): # print only if user is not myself
+        if (u != username): # print only if user is not myself
+            if (a == 'announcement'):
                 sys.stdout.write('{} {} {}\n'.format(colored(u, 'green', attrs = ['bold']), colored('joined the chat from', 'green'), colored(h, 'green', attrs = ['bold'])))
-        else:
-            sys.stdout.write('[{}] {}'.format(colored(u, attrs = ['bold']), d))
+            else:
+                sys.stdout.write('<{}> {}'.format(colored(u, attrs = ['bold']), d))
 
         sys.stdout.flush()
 
@@ -141,12 +151,13 @@ class MrChaTTY:
 
         message = sys.stdin.readline()
 
-        #sys.stdout.write('\x1b[1A\r# ')
         sys.stdout.flush()
 
         return message
 
 if __name__ == '__main__':
+#    sys.tracebacklimit = 0
+#    sys.excepthook = exception_handler
     signal.signal(signal.SIGINT, signal_handler)
 
     parser = argparse.ArgumentParser()
