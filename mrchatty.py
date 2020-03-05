@@ -1,13 +1,21 @@
 #!/usr/bin/env python3
 
+# TODO:
+# - colors in error messages
+# - random colors for usernames
+# - encryption for messages
+
 import argparse
 import asyncio
+import base64
+import hashlib
 import platform
 import select
 import signal
 import socket
 import sys
 import time
+from cryptography.fernet import Fernet
 from json import dumps, loads
 from optparse import OptionParser
 from termcolor import colored, cprint
@@ -30,11 +38,25 @@ def signal_handler(signal, frame):
         print()
         sys.exit()
 
+def get_key_hash(key):
+    key_md5 = hashlib.md5()
+    key_md5.update(key.encode('utf-8'))
+    b64_key_hash = base64.b64encode(key_md5.hexdigest().encode('ascii')).decode('ascii')
+
+    return Fernet(b64_key_hash)
+
+def encrypt_message(decrypted_message, key):
+    return get_key_hash(key).encrypt(decrypted_message.encode('utf-8'))
+
+def decrypt_message(encrypted_message, key):
+    return get_key_hash(key).decrypt(encrypted_message).decode('utf-8')
+
 class Chat:
-    def __init__(self, port, render_message, username):
+    def __init__(self, port, render_message, username, host):
+        self.port = port
         self.render_message = render_message
         self.username = username
-        self.port = port
+        self.host = host
 
         try:
             self.sock_to_read = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -44,22 +66,22 @@ class Chat:
             self.sock_to_write = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.sock_to_write.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         except Exception as e:
-            raise ConnectionError('Unable to connect')
+            raise ConnectionError('Unable to connect.')
 
-    def send_request(self, sock_to_write, action, data=None):
-        object_to_send = {'action': action, 'data': data, 'username': self.username}
-        sock_to_write.sendto(bytes(dumps(object_to_send), 'UTF-8'), ('255.255.255.255', self.port))
+    def send_request(self, sock_to_write, action, data = None):
+        object_to_send = {'action': action, 'data': data, 'username': self.username, 'host': self.host}
+        sock_to_write.sendto(bytes(dumps(object_to_send), 'utf-8'), ('255.255.255.255', self.port))
 
     def iterate(self):
         socket_list = [self.sock_to_read]
         ready_to_read, _, _ = select.select(socket_list, [], [], 0)
 
         for sock in ready_to_read:
-            # incoming message from server
             if sock == self.sock_to_read:
                 data = sock.recv(4096).decode('utf-8')
+
                 if not data:
-                    raise ConnectionAbortedError('Disconnected from chat server')
+                    raise ConnectionAbortedError('Connection aborted.')
                 else:
                     self.render_message(data)
 
@@ -67,8 +89,8 @@ class Chat:
         self.send_request(self.sock_to_write, 'message', message)
 
 class MrChaTTY:
-    def __init__(self, port, username):
-        self.chat = Chat(port, self.render_message, username)
+    def __init__(self, port, username, host):
+        self.chat = Chat(port, self.render_message, username, host)
 
     def iterate(self):
         self.chat.iterate()
@@ -76,13 +98,16 @@ class MrChaTTY:
         data = self.get_input()
 
         if data is not None:
+            if data[0] == '/':
+                print("command")
+
             self.chat.send_message(data)
 
     @staticmethod
     def render_message(message):
         sys.stdout.write('\r')
         message = loads(message)
-        sys.stdout.write('[{}] {}\n'.format(message['username'], message['data']))
+        sys.stdout.write('[{}@{}] {}'.format(colored(message['username'], attrs = ['bold']), message['host'], message['data']))
 #        sys.stdout.write('$ ')
         sys.stdout.flush()
 
@@ -115,12 +140,11 @@ if __name__ == '__main__':
     ip = socket.gethostbyname(host)
 
     logo()
-    print('Username: ' + colored(username, attrs=['bold']))
-    print('Local IP: ' + colored(ip, attrs=['bold']))
+    print('Username: ' + colored(username, attrs = ['bold']))
+    print('Local IP: ' + colored(ip, attrs = ['bold']))
     print('----')
 
-#    mrchatty = MrChaTTY(port, username + '@' + ip)
-    mrchatty = MrChaTTY(port, colored(username, attrs=['bold']) + '@' + ip)
+    mrchatty = MrChaTTY(port, username, ip)
 
     while True:
         mrchatty.iterate()
