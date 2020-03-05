@@ -4,10 +4,13 @@
 # - colors in error messages
 # - random colors for usernames
 # - encryption for messages
+# - send announcement message
+# - handle ctrl+d
 
 import argparse
 import asyncio
 import base64
+import datetime
 import hashlib
 import platform
 import select
@@ -20,8 +23,7 @@ from json import dumps, loads
 from optparse import OptionParser
 from termcolor import colored, cprint
 
-port = 31337
-users = []
+port = 31337 # default UDP port
 
 def logo():
     print(colored(' _____     _____ _       _____ _____ __ __ ',  'cyan'))
@@ -36,6 +38,7 @@ def signal_handler(signal, frame):
         print()
         print('You pressed Ctrl+C! Goodbye!')
         print()
+
         sys.exit()
 
 def get_key_hash(key):
@@ -85,12 +88,16 @@ class Chat:
                 else:
                     self.render_message(data)
 
+    def send_announcement(self, message):
+        self.send_request(self.sock_to_write, 'announcement', message)
+
     def send_message(self, message):
         self.send_request(self.sock_to_write, 'message', message)
 
 class MrChaTTY:
     def __init__(self, port, username, host):
         self.chat = Chat(port, self.render_message, username, host)
+        self.chat.send_announcement('')
 
     def iterate(self):
         self.chat.iterate()
@@ -99,16 +106,29 @@ class MrChaTTY:
 
         if data is not None:
             if data[0] == '/':
-                print("command")
+                command = data[1:].rstrip()
 
-            self.chat.send_message(data)
+                if (command == 'date'):
+                    print(colored(datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S"), 'magenta'))
+            else:
+                self.chat.send_message(data)
 
     @staticmethod
     def render_message(message):
         sys.stdout.write('\r')
+
         message = loads(message)
-        sys.stdout.write('[{}@{}] {}'.format(colored(message['username'], attrs = ['bold']), message['host'], message['data']))
-#        sys.stdout.write('$ ')
+        u = message['username']
+        a = message['action']
+        h = message['host']
+        d = message['data']
+
+        if (a == 'announcement'):
+            if (u != username): # print only if user is not myself
+                sys.stdout.write('{} {} {}\n'.format(colored(u, 'green', attrs = ['bold']), colored('joined the chat from', 'green'), colored(h, 'green', attrs = ['bold'])))
+        else:
+            sys.stdout.write('[{}] {}'.format(colored(u, attrs = ['bold']), d))
+
         sys.stdout.flush()
 
     @staticmethod
@@ -142,7 +162,7 @@ if __name__ == '__main__':
     logo()
     print('Username: ' + colored(username, attrs = ['bold']))
     print('Local IP: ' + colored(ip, attrs = ['bold']))
-    print('----')
+    print(colored('-------------------------------------------',  'yellow'))
 
     mrchatty = MrChaTTY(port, username, ip)
 
