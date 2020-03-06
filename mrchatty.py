@@ -4,7 +4,6 @@
 # - colors in error messages
 # - random colors for usernames
 # - encryption for messages
-# - send announcement message
 
 import argparse
 import asyncio
@@ -55,6 +54,19 @@ def encrypt_message(decrypted_message, key):
 
 def decrypt_message(encrypted_message, key):
     return get_key_hash(key).decrypt(encrypted_message).decode('utf-8')
+
+def get_ip():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+    try:
+        s.connect(('10.255.255.255', 1))
+        ip = s.getsockname()[0]
+    except:
+        ip = '127.0.0.1'
+    finally:
+        s.close()
+
+    return ip
 
 class Chat:
     def __init__(self, port, render_message, username, host):
@@ -156,19 +168,23 @@ class MrChaTTY:
         return message
 
 if __name__ == '__main__':
-#    sys.tracebacklimit = 0
-#    sys.excepthook = exception_handler
     signal.signal(signal.SIGINT, signal_handler)
 
     parser = argparse.ArgumentParser()
     parser.add_argument('-u', '--user', help = 'Username of your choice', required = True)
 #    parser.add_argument('-k', '--key', help = 'Group-defined secret key', required = True)
+    parser.add_argument('-d', '--debug', help = 'Debug messages for errors and exceptions', action = 'store_false')
     args = parser.parse_args()
     username = args.user
 #    key = args.key
+    debug = args.debug
+
+    if (debug):
+        sys.tracebacklimit = 0
+        sys.excepthook = exception_handler
 
     host = platform.node()
-    ip = socket.gethostbyname(host)
+    ip = get_ip()
 
     logo()
     print('Username: ' + colored(username, attrs = ['bold']))
