@@ -22,6 +22,8 @@ from optparse import OptionParser
 from termcolor import colored, cprint
 
 port = 31337 # default UDP port
+broadcast_addr = '10.255.255.255'
+broadcast_mask = '255.255.255.255'
 
 def logo():
     print(colored(' _____     _____ _       _____ _____ __ __ ',  'cyan'))
@@ -59,7 +61,7 @@ def get_ip():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
     try:
-        s.connect(('10.255.255.255', 1))
+        s.connect((broadcast_addr, 1))
         ip = s.getsockname()[0]
     except:
         ip = '127.0.0.1'
@@ -89,7 +91,7 @@ class Chat:
 
     def send_request(self, sock_to_write, action, data = None):
         object_to_send = {'action': action, 'data': data, 'username': self.username, 'host': self.host}
-        sock_to_write.sendto(bytes(dumps(object_to_send), 'utf-8'), ('255.255.255.255', self.port))
+        sock_to_write.sendto(bytes(dumps(object_to_send), 'utf-8'), (broadcast_mask, self.port))
 
     def iterate(self):
         socket_list = [self.sock_to_read]
