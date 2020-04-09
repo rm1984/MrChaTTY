@@ -31,7 +31,7 @@ def logo():
     print(colored('|     |___|     | |_ ___|_   _|_   _|  |  |',  'cyan'))
     print(colored('| | | |  _|   --|   | .\'| | |   | | |_   _|', 'cyan'))
     print(colored('|_|_|_|_| |_____|_|_|__,| |_|   |_|   |_|  ',  'cyan'))
-    print(colored('Coded by: Riccardo Mollo', 'cyan'))
+    print(colored('                Coded by: Riccardo Mollo', 'cyan'))
     print()
 
 def exception_handler(exception_type, exception, traceback):
