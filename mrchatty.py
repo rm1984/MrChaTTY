@@ -21,9 +21,10 @@ from json import dumps, loads
 from optparse import OptionParser
 from termcolor import colored, cprint
 
-port = 31337 # default UDP port
-broadcast_addr = '10.255.255.255'
-broadcast_mask = '255.255.255.255'
+bind_addr = '0.0.0.0'
+bind_port = 31337 # default UDP port
+mcst_addr = '10.255.255.255'
+mcst_mask = '255.255.255.255'
 
 def logo():
     print(colored(' _____     _____ _       _____ _____ __ __ ',  'cyan'))
@@ -61,7 +62,7 @@ def get_ip():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
     try:
-        s.connect((broadcast_addr, 1))
+        s.connect((mcst_addr, 1))
         ip = s.getsockname()[0]
     except:
         ip = '127.0.0.1'
@@ -81,7 +82,7 @@ class Chat:
             self.sock_to_read = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.sock_to_read.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self.sock_to_read.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-            self.sock_to_read.bind(('0.0.0.0', port))
+            self.sock_to_read.bind((bind_addr, port))
             self.sock_to_write = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.sock_to_write.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         except PermissionError as pe:
@@ -91,7 +92,7 @@ class Chat:
 
     def send_request(self, sock_to_write, action, data = None):
         object_to_send = {'action': action, 'data': data, 'username': self.username, 'host': self.host}
-        sock_to_write.sendto(bytes(dumps(object_to_send), 'utf-8'), (broadcast_mask, self.port))
+        sock_to_write.sendto(bytes(dumps(object_to_send), 'utf-8'), (mcst_mask, self.port))
 
     def iterate(self):
         socket_list = [self.sock_to_read]
@@ -193,7 +194,7 @@ if __name__ == '__main__':
     print('Local IP: ' + colored(ip, attrs = ['bold']))
     print(colored('-------------------------------------------',  'yellow'))
 
-    mrchatty = MrChaTTY(port, username, ip)
+    mrchatty = MrChaTTY(bind_port, username, ip)
 
     while True:
         mrchatty.iterate()
