@@ -4,9 +4,10 @@
 # - colors in error messages
 # - random colors for usernames
 # - encryption for messages
+# - handle users with same username
+# - save a list of currently chatting users
 
 import argparse
-import asyncio
 import base64
 import datetime
 import hashlib
@@ -15,16 +16,14 @@ import select
 import signal
 import socket
 import sys
-import time
-from cryptography.fernet import Fernet
 from json import dumps, loads
-from optparse import OptionParser
-from termcolor import colored, cprint
+from cryptography.fernet import Fernet
+from termcolor import colored
 
-bind_addr = '0.0.0.0'
-bind_port = 31337 # default UDP port
-mcst_addr = '10.255.255.255'
-mcst_mask = '255.255.255.255'
+BIND_ADDR = '0.0.0.0'
+BIND_PORT = 31337 # default UDP port
+MCST_ADDR = '10.255.255.255'
+MCST_MASK = '255.255.255.255'
 
 def logo():
     print(colored(' _____     _____ _       _____ _____ __ __ ',  'cyan'))
@@ -35,10 +34,10 @@ def logo():
     print()
 
 def exception_handler(exception_type, exception, traceback):
-    print("%s: %s" % (exception_type.__name__, exception))
+    print("%s: %s\n%s" % (exception_type.__name__, exception, traceback))
 
-def signal_handler(signal, frame):
-    if signal == 2: # Ctrl+C (SIGINT)
+def signal_handler(sig, frame):
+    if sig == 2: # Ctrl+C (SIGINT)
         print()
         print('You pressed Ctrl+C! Goodbye!')
         print()
@@ -59,17 +58,17 @@ def decrypt_message(encrypted_message, key):
     return get_key_hash(key).decrypt(encrypted_message).decode('utf-8')
 
 def get_ip():
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
     try:
-        s.connect((mcst_addr, 1))
-        ip = s.getsockname()[0]
-    except:
-        ip = '127.0.0.1'
+        sock.connect((MCST_ADDR, 1))
+        ip_addr = sock.getsockname()[0]
+    except Exception:
+        ip_addr = '127.0.0.1'
     finally:
-        s.close()
+        sock.close()
 
-    return ip
+    return ip_addr
 
 class Chat:
     def __init__(self, port, render_message, username, host):
@@ -82,17 +81,17 @@ class Chat:
             self.sock_to_read = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.sock_to_read.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self.sock_to_read.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-            self.sock_to_read.bind((bind_addr, port))
+            self.sock_to_read.bind((BIND_ADDR, port))
             self.sock_to_write = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.sock_to_write.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        except PermissionError as pe:
-            raise ConnectionError(colored('Permission denied (binding failed for port ' + str(port) + '/UDP)', 'red', attrs = ['bold']))
-        except Exception as e:
-            raise ConnectionError(colored('Unable to connect.', 'red', attrs = ['bold']))
+        except PermissionError as permission_error:
+            raise ConnectionError(colored('Permission denied (binding failed for port ' + str(port) + '/UDP)', 'red', attrs = ['bold'])) from permission_error
+        except Exception as exception:
+            raise ConnectionError(colored('Unable to connect.', 'red', attrs = ['bold'])) from exception
 
     def send_request(self, sock_to_write, action, data = None):
         object_to_send = {'action': action, 'data': data, 'username': self.username, 'host': self.host}
-        sock_to_write.sendto(bytes(dumps(object_to_send), 'utf-8'), (mcst_mask, self.port))
+        sock_to_write.sendto(bytes(dumps(object_to_send), 'utf-8'), (MCST_MASK, self.port))
 
     def iterate(self):
         socket_list = [self.sock_to_read]
@@ -104,14 +103,17 @@ class Chat:
 
                 if not data:
                     raise ConnectionAbortedError(colored('Connection aborted.', 'red', attrs = ['bold']))
-                else:
-                    self.render_message(data)
+
+                self.render_message(data)
 
     def send_announcement(self, message):
         self.send_request(self.sock_to_write, 'announcement', message)
 
     def send_message(self, message):
         self.send_request(self.sock_to_write, 'message', message)
+
+    def send_bye(self, message):
+        self.send_request(self.sock_to_write, 'bye', message)
 
 class MrChaTTY:
     def __init__(self, port, username, host):
@@ -124,17 +126,27 @@ class MrChaTTY:
         data = self.get_input()
 
         if data is not None:
-            if (len(data) == 0): # Ctrl+D
+            if len(data) == 0: # Ctrl+D
                 print()
                 print('You pressed Ctrl+D! Goodbye!')
                 print()
 
+                self.chat.send_bye('')
                 sys.exit()
             elif data[0] == '/':
                 command = data[1:].rstrip()
 
-                if (command == 'date'):
+                if command in 'date':
+                    print(colored(datetime.datetime.now().strftime("%d/%m/%Y"), 'magenta'))
+                elif command in 'time':
+                    print(colored(datetime.datetime.now().strftime("%H:%M:%S"), 'magenta'))
+                elif command in 'datetime':
                     print(colored(datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S"), 'magenta'))
+                elif command in ('bye', 'exit', 'leave', 'quit'):
+                    self.chat.send_bye('')
+                    sys.exit()
+                else:
+                    print(colored('Invalid command: ' + command, 'magenta'))
             else:
                 self.chat.send_message(data)
 
@@ -143,16 +155,18 @@ class MrChaTTY:
         sys.stdout.write('\r')
 
         message = loads(message)
-        u = message['username']
-        a = message['action']
-        h = message['host']
-        d = message['data']
+        nickname = message['username']
+        action = message['action']
+        origin_host = message['host']
+        message = message['data']
 
-        if (u != username): # print only if user is not myself
-            if (a == 'announcement'):
-                sys.stdout.write('{} {} {}\n'.format(colored(u, 'green', attrs = ['bold']), colored('joined the chat from', 'green'), colored(h, 'green', attrs = ['bold'])))
+        if nickname != username: # print only if user is not myself
+            if action == 'announcement':
+                sys.stdout.write('{} {} {}\n'.format(colored(nickname, 'green', attrs = ['bold']), colored('joined the chat from', 'green'), colored(origin_host, 'green', attrs = ['bold'])))
+            elif action == 'bye':
+                sys.stdout.write('{} {}\n'.format(colored(nickname, 'green', attrs = ['bold']), colored('left the chat. Bye!', 'green')))
             else:
-                sys.stdout.write('<{}> {}'.format(colored(u, attrs = ['bold']), d))
+                sys.stdout.write('<{}> {}'.format(colored(nickname, attrs = ['bold']), message))
 
         sys.stdout.flush()
 
@@ -182,19 +196,19 @@ if __name__ == '__main__':
 #    key = args.key
     debug = args.debug
 
-    if (debug):
+    if debug:
         sys.tracebacklimit = 0
         sys.excepthook = exception_handler
 
     host = platform.node()
-    ip = get_ip()
+    ipAddr = get_ip()
 
     logo()
     print('Username: ' + colored(username, attrs = ['bold']))
-    print('Local IP: ' + colored(ip, attrs = ['bold']))
-    print(colored('-------------------------------------------',  'yellow'))
+    print('Local IP: ' + colored(ipAddr, attrs = ['bold']))
+    print(colored('-------------------------------------------', 'yellow'))
 
-    mrchatty = MrChaTTY(bind_port, username, ip)
+    mrchatty = MrChaTTY(BIND_PORT, username, ipAddr)
 
     while True:
         mrchatty.iterate()
