@@ -5,7 +5,6 @@
 # - random colors for usernames
 # - encryption for messages
 # - handle users with same username
-# - save a list of currently chatting users
 
 import argparse
 import base64
@@ -76,6 +75,7 @@ class Chat:
         self.render_message = render_message
         self.username = username
         self.host = host
+        self.users = []
 
         try:
             self.sock_to_read = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -84,6 +84,7 @@ class Chat:
             self.sock_to_read.bind((BIND_ADDR, port))
             self.sock_to_write = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.sock_to_write.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            self.users.append(self.username)
         except PermissionError as permission_error:
             raise ConnectionError(colored('Permission denied (binding failed for port ' + str(port) + '/UDP)', 'red', attrs = ['bold'])) from permission_error
         except Exception as exception:
@@ -104,21 +105,26 @@ class Chat:
                 if not data:
                     raise ConnectionAbortedError(colored('Connection aborted.', 'red', attrs = ['bold']))
 
-                self.render_message(data)
+                self.render_message(self, data)
 
-    def send_announcement(self, message):
-        self.send_request(self.sock_to_write, 'announcement', message)
+    def send_announcement(self):
+        self.send_request(self.sock_to_write, 'announcement', '')
 
     def send_message(self, message):
         self.send_request(self.sock_to_write, 'message', message)
 
-    def send_bye(self, message):
-        self.send_request(self.sock_to_write, 'bye', message)
+    def send_bye(self):
+        self.send_request(self.sock_to_write, 'bye', '')
+
+    def send_users_local_list(self, message):
+        self.send_request(self.sock_to_write, 'users_list', message)
 
 class MrChaTTY:
     def __init__(self, port, username, host):
         self.chat = Chat(port, self.render_message, username, host)
-        self.chat.send_announcement('')
+        self.chat.send_announcement()
+        #self.chat.send_users_local_list(json.dumps(self.chat.users))
+        self.chat.send_users_local_list(self.chat.users)
 
     def iterate(self):
         self.chat.iterate()
@@ -131,7 +137,7 @@ class MrChaTTY:
                 print('You pressed Ctrl+D! Goodbye!')
                 print()
 
-                self.chat.send_bye('')
+                self.chat.send_bye()
                 sys.exit()
             elif data[0] == '/':
                 command = data[1:].rstrip()
@@ -143,15 +149,19 @@ class MrChaTTY:
                 elif command in 'datetime':
                     print(colored(datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S"), 'magenta'))
                 elif command in ('bye', 'exit', 'leave', 'quit'):
-                    self.chat.send_bye('')
+                    self.chat.send_bye()
                     sys.exit()
+                elif command in 'users':
+                    print(colored('There are ' + str(len(self.chat.users)) + ' users in this room:', 'magenta'))
+                    for user in self.chat.users:
+                        print(colored('- ' + user, 'magenta'))
                 else:
                     print(colored('Invalid command: ' + command, 'magenta'))
             else:
                 self.chat.send_message(data)
 
     @staticmethod
-    def render_message(message):
+    def render_message(chat, message):
         sys.stdout.write('\r')
 
         message = loads(message)
@@ -163,8 +173,13 @@ class MrChaTTY:
         if nickname != username: # print only if user is not myself
             if action == 'announcement':
                 sys.stdout.write('{} {} {}\n'.format(colored(nickname, 'green', attrs = ['bold']), colored('joined the chat from', 'green'), colored(origin_host, 'green', attrs = ['bold'])))
+                chat.users.append(nickname)
+                chat.send_users_local_list(chat.users)
             elif action == 'bye':
                 sys.stdout.write('{} {}\n'.format(colored(nickname, 'green', attrs = ['bold']), colored('left the chat. Bye!', 'green')))
+                chat.users.remove(nickname)
+            elif action == 'users_list':
+                chat.users = sorted(list(set(chat.users) | set(message)))
             else:
                 sys.stdout.write('<{}> {}'.format(colored(nickname, attrs = ['bold']), message))
 
