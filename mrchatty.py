@@ -7,20 +7,18 @@
 # - handle users with same username
 
 import argparse
-import base64
 import datetime
-import hashlib
 import platform
 import select
 import signal
 import socket
 import sys
 from json import dumps, loads
-from cryptography.fernet import Fernet
 from termcolor import colored
+import cryptocode
 
-BIND_ADDR = '0.0.0.0'
-BIND_PORT = 31337 # default UDP port
+BIND_ADDR = '0.0.0.0' # listen on any address
+BIND_PORT = 31337     # default UDP port
 MCST_ADDR = '10.255.255.255'
 MCST_MASK = '255.255.255.255'
 
@@ -43,19 +41,6 @@ def signal_handler(sig, frame):
 
         sys.exit()
 
-def get_key_hash(key):
-    key_md5 = hashlib.md5()
-    key_md5.update(key.encode('utf-8'))
-    b64_key_hash = base64.b64encode(key_md5.hexdigest().encode('ascii')).decode('ascii')
-
-    return Fernet(b64_key_hash)
-
-def encrypt_message(decrypted_message, key):
-    return get_key_hash(key).encrypt(decrypted_message.encode('utf-8'))
-
-def decrypt_message(encrypted_message, key):
-    return get_key_hash(key).decrypt(encrypted_message).decode('utf-8')
-
 def get_ip():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
@@ -70,11 +55,12 @@ def get_ip():
     return ip_addr
 
 class Chat:
-    def __init__(self, port, render_message, username, host):
+    def __init__(self, port, render_message, username, host, key):
         self.port = port
         self.render_message = render_message
         self.username = username
         self.host = host
+        self.key = key
         self.users = []
 
         try:
@@ -110,20 +96,22 @@ class Chat:
     def send_announcement(self):
         self.send_request(self.sock_to_write, 'announcement', '')
 
-    def send_message(self, message):
-        self.send_request(self.sock_to_write, 'message', message)
+    def send_message(self, message, key):
+        if key is None:
+            self.send_request(self.sock_to_write, 'message', message)
+        else:
+            self.send_request(self.sock_to_write, 'message', cryptocode.encrypt(message, key))
 
     def send_bye(self):
         self.send_request(self.sock_to_write, 'bye', '')
 
-    def send_users_local_list(self, message):
-        self.send_request(self.sock_to_write, 'users_list', message)
+    def send_users_local_list(self, users_list):
+        self.send_request(self.sock_to_write, 'users_list', users_list)
 
 class MrChaTTY:
-    def __init__(self, port, username, host):
-        self.chat = Chat(port, self.render_message, username, host)
+    def __init__(self, port, username, host, key):
+        self.chat = Chat(port, self.render_message, username, host, key)
         self.chat.send_announcement()
-        #self.chat.send_users_local_list(json.dumps(self.chat.users))
         self.chat.send_users_local_list(self.chat.users)
 
     def iterate(self):
@@ -158,7 +146,7 @@ class MrChaTTY:
                 else:
                     print(colored('Invalid command: ' + command, 'magenta'))
             else:
-                self.chat.send_message(data)
+                self.chat.send_message(data, key)
 
     @staticmethod
     def render_message(chat, message):
@@ -181,7 +169,15 @@ class MrChaTTY:
             elif action == 'users_list':
                 chat.users = sorted(list(set(chat.users) | set(message)))
             else:
-                sys.stdout.write('<{}> {}'.format(colored(nickname, attrs = ['bold']), message))
+                if chat.key is None:
+                    sys.stdout.write('<{}> {}'.format(colored(nickname, attrs = ['bold']), message))
+                else:
+                    message = cryptocode.decrypt(message, key)
+
+                    if message is not False:
+                        sys.stdout.write('<{}> {}'.format(colored(nickname, attrs = ['bold']), message))
+                    else:
+                        sys.stdout.write('<{}> {}'.format(colored(nickname, attrs = ['bold']), colored('UNREADABLE MESSAGE\n', 'red'))) # tofix
 
         sys.stdout.flush()
 
@@ -204,11 +200,11 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     parser.add_argument('-u', '--user', help = 'Username of your choice', required = True)
-#    parser.add_argument('-k', '--key', help = 'Group-defined secret key', required = True)
+    parser.add_argument('-k', '--key', help = 'Group-defined secret key', required = False)
     parser.add_argument('-d', '--debug', help = 'Debug messages for errors and exceptions', action = 'store_false')
     args = parser.parse_args()
     username = args.user
-#    key = args.key
+    key = args.key
     debug = args.debug
 
     if debug:
@@ -223,7 +219,7 @@ if __name__ == '__main__':
     print('Local IP: ' + colored(ipAddr, attrs = ['bold']))
     print(colored('-------------------------------------------', 'yellow'))
 
-    mrchatty = MrChaTTY(BIND_PORT, username, ipAddr)
+    mrchatty = MrChaTTY(BIND_PORT, username, ipAddr, key)
 
     while True:
         mrchatty.iterate()
